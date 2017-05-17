@@ -70,6 +70,8 @@ Run evaluation scripts
 ----------------------
 The replication kit also contains our scripts for the evaluation of the results. The scripts contain R code. We recommend using [RStudio](https://www.rstudio.com/) for the execution of the code. The scripts try to install some libraries from [CRAN](http://cran.us.r-project.org/). Make sure that you have a internet connection available and that the CRAN mirror is properly configured in your R environment. 
 
+Both scripts allow the definition of paths for generated results, i.e., plots and tables. Make sure that the folders exists before executing the code, as the R scripts do not automatically generate those folders. 
+
 The [generate_results.R](R-scripts/generate_results.R) performs most of the this. The script contains the logic for the statistical comparison of the results, as well as the generation of all plots and results tables contained in the article. At the beginning of the file, global variables define some options for the execution, e.g., if the plots should be generated, where they should be stored, and the connection details for the MySQL database. 
 
 Additionally, the script [generate_htmlplots.R](R-scripts/generate_htmlplots.R) contains code that generates the [boxplots](additional-visualizations/boxplots.html) which are contained in this replication kit. Same as above, the script also contains some global variable at the beginning of the script for the location and the connection details for the MySQL database. 
