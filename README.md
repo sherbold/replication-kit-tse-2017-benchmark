@@ -37,7 +37,7 @@ Setup local a MySQL database
 1. Install MySQL - any version should work, we do not use special features.
 2. Create a database called "crosspare".
 3. Create a user called "crosspare" with password "crosspare".
-4. Create the table results and the view resultsView using the [setup-db.sql](sql/setup-db.sql)
+4. Create the table results and the view resultsView by executing the SQL code in the [setup-db.sql](sql/setup-db.sql) script.
 
 It is also possible to a different database name, user name, and password. In that case, the [mysql.cred](benchmark-execution/mysql.cred) muts be adopted for the execution of the benchmark and the global variables at the beginning of the R scripts for the evaluation and plot generation. 
 
@@ -46,18 +46,19 @@ The database contains more columns for metrics than are reported on within the p
 - true negative rate
 - the confusion matrix itself (tp, fp, tn, fn columns).
 
-**There are several other columns within the as well, however, they should be ignored as they are experimental and where not tested properly**. Most of them result rather from testing what is possible with CrossPare and where hacked in rather quickly without any double checking, e.g., AUCEC to see if the evaluation framework would be able to take effort into account. However, this works only for some data sets, and even there buggy. *Please also not that this comment holds only for the version of CrossPare contained in the replication package. Further development since April 2017 may have fixed, removed or added the calculation of metrics.*
+**There are several other columns within the as well, however, they should be ignored as they are experimental and where not tested properly**. Most of them result rather from testing what is possible with CrossPare and where hacked in rather quickly without any double checking, e.g., AUCEC to see if the evaluation framework would be able to take effort into account. However, this works only for some data sets, and even there buggy. *Please also note that this comment holds only for the version of CrossPare contained in the replication package. Further development since April 2017 may have fixed, removed or added the calculation of metrics.*
 
-
-Import raw benchmark results into database
+Raw benchmark results
 ------------------------------------------
-The raw data was exported using MySQL Workbench 6.3 CE. To import the data using MySQL Workbench, you have tp right-click on the results table, and select "Table Data Import Wizard". You can also try to load the CSV data using the [mysqlimport command](https://dev.mysql.com/doc/refman/5.7/en/load-data.html), however, we have not tested that. 
+The raw data is available in two formats.
+- The [db-inserts.sql](raw-results/db-inserts.sql) SQL script with SQL insert statements to populate the results table.
+- The [crosspare-results-replication-kit.csv](raw-results/crosspare-results-replication-kit.csv) Comma Separated Values (CSV) file for exploration of the results without the requirement of a MySQL database. 
 
 Replicate raw results
 ---------------------
-It is also possible to execute the benchmark and replicate all raw results from scratch. To execute the replication, you can simply use the batch scripts for Linux and Windows. Please note that they try to create a virtual machine with access to roughly 30 GB of heap space. Sometimes, this is still not enough, in which case the execution will simply crash. However, you can just restart the execution, and the calculation of results will continue where it left of. The only solution to completely remove the crashs would be lots more memory. 
+It is also possible to execute the benchmark and replicate all raw results from scratch. To execute the replication, you can simply use the batch scripts for Linux and Windows. Please note that they try to create a Java Virtual Machine (JVM) with access to roughly 30 GB of heap space. Sometimes, this is still not enough, in which case the execution will simply crash. However, you can just restart the execution, and the calculation of results will continue where it left of. The only solution to completely remove the crashs would be lots more memory. 
 
-Please note, that nothing will happen if you have already imported the raw benchmark results into the database, since the benchmark execution checks which results are already available, and only executes missing parts. 
+Please note, that executing the full benchmark if the database is already populated with the raw results we provided will not work. Ideally, nothing will happen, because the benchmark execution checks which results are already available, and only executes missing parts. More likely, the execution will crash because the MySQL database will at some point reject the connection. This happens because of the rapid checking if results are already available, which will lead to thousands of queries within seconds, if the database is already populated. 
 
 The replication package uses the tool [CrossPare](https://github.com/sherbold/CrossPare/). CrossPare implements many approaches proposed for cross-project defect prediction and supports loading data from various published data sets. The experiments themselves are defined using XML files, that describe which data is loaded and how the defect prediction models are trained. All experiment configurations are contained in the [config](benchmark-execution/benchmark/config) folder. The [config-infeasible](benchmark-execution/benchmark/config-infeasible) folder contains the configurations that could not be executed due to memory and runtime constraints. 
 
@@ -67,7 +68,9 @@ The results of the execution are stored in the MySQL database. Additionally, the
 
 Run evaluation scripts
 ----------------------
-The replication kit also contains our scripts for the evaluation of the results. The [generate_results.R](R-scripts/generate_results.R) performs most of the this. The script contains the logic for the statistical comparison of the results, as well as the generation of all plots and results tables contained in the article. At the beginning of the file, global variables define some options for the execution, e.g., if the plots should be generated, where they should be stored, and the connection details for the MySQL database. 
+The replication kit also contains our scripts for the evaluation of the results. The scripts contain R code. We recommend using [RStudio](https://www.rstudio.com/) for the execution of the code. The scripts try to install some libraries from [CRAN](http://cran.us.r-project.org/). Make sure that you have a internet connection available and that the CRAN mirror is properly configured in your R environment. 
+
+The [generate_results.R](R-scripts/generate_results.R) performs most of the this. The script contains the logic for the statistical comparison of the results, as well as the generation of all plots and results tables contained in the article. At the beginning of the file, global variables define some options for the execution, e.g., if the plots should be generated, where they should be stored, and the connection details for the MySQL database. 
 
 Additionally, the script [generate_htmlplots.R](R-scripts/generate_htmlplots.R) contains code that generates the [boxplots](additional-visualizations/boxplots.html) which are contained in this replication kit. Same as above, the script also contains some global variable at the beginning of the script for the location and the connection details for the MySQL database. 
 
