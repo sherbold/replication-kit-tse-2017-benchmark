@@ -46,7 +46,7 @@ The database contains more columns for metrics than are reported on within the p
 - true negative rate
 - the confusion matrix itself (tp, fp, tn, fn columns).
 
-**There are several other columns within the as well, however, they should be ignored as they are experimental and where not tested properly**. Most of them result rather from testing what is possible with CrossPare and where hacked in rather quickly without any double checking, e.g., AUCEC to see if the evaluation framework would be able to take effort into account. However, this works only for some data sets, and even there buggy. *Please also note that this comment holds only for the version of CrossPare contained in the replication package. Further development since April 2017 may have fixed, removed or added the calculation of metrics.*
+**There are several other columns within the data as well, however, they should be ignored as they are experimental and were not tested properly**. Most of them result rather from testing what is possible with CrossPare and where hacked in rather quickly without any double checking, e.g., AUCEC to see if the evaluation framework would be able to take effort into account. However, this works only for some data sets, and even there it is still buggy. *Please also note that this comment holds only for the version of CrossPare contained in the replication package. Further development since April 2017 may have fixed, removed or added the calculation of metrics.*
 
 Raw benchmark results
 ------------------------------------------
@@ -56,7 +56,7 @@ The raw data is available in two formats.
 
 Replicate raw results
 ---------------------
-It is also possible to execute the benchmark and replicate all raw results from scratch. To execute the replication, you can simply use the batch scripts for Linux and Windows. Please note that they try to create a Java Virtual Machine (JVM) with access to roughly 30 GB of heap space. Sometimes, this is still not enough, in which case the execution will simply crash. However, you can just restart the execution, and the calculation of results will continue where it left of. The only solution to completely remove the crashs would be lots more memory. 
+It is also possible to execute the benchmark and replicate all raw results from scratch. To execute the replication, you can simply use the batch scripts for Linux and Windows. Please note that they try to create a Java Virtual Machine (JVM) with access to roughly 30 GB of heap space. Sometimes, this is still not enough, in which case the execution will simply crash. However, you can just restart the execution, and the calculation of results will continue from where it stopped. The only solution to completely remove the crashes would be a lot more memory. 
 
 Please note, that executing the full benchmark if the database is already populated with the raw results we provided will not work. Ideally, nothing will happen, because the benchmark execution checks which results are already available, and only executes missing parts. More likely, the execution will crash because the MySQL database will at some point reject the connection. This happens because of the rapid checking if results are already available, which will lead to thousands of queries within seconds, if the database is already populated. 
 
@@ -72,7 +72,7 @@ The replication kit also contains our scripts for the evaluation of the results.
 
 Both scripts allow the definition of paths for generated results, i.e., plots and tables. Make sure that the folders exists before executing the code, as the R scripts do not automatically generate those folders. 
 
-The [generate_results.R](R-scripts/generate_results.R) performs most of the this. The script contains the logic for the statistical comparison of the results, as well as the generation of all plots and results tables contained in the article. At the beginning of the file, global variables define some options for the execution, e.g., if the plots should be generated, where they should be stored, and the connection details for the MySQL database. 
+The [generate_results.R](R-scripts/generate_results.R) performs most of the the analysis of the raw data performed for our benchmark. The script contains the logic for the statistical comparison of the results, as well as the generation of all plots and results tables contained in the article. At the beginning of the file, global variables define some options for the execution, e.g., if the plots should be generated, where they should be stored, and the connection details for the MySQL database. 
 
 Additionally, the script [generate_htmlplots.R](R-scripts/generate_htmlplots.R) contains code that generates the [boxplots](additional-visualizations/boxplots.html) which are contained in this replication kit. Same as above, the script also contains some global variable at the beginning of the script for the location and the connection details for the MySQL database. 
 
