@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/91100348.svg)](https://zenodo.org/badge/latestdoi/91100348)
+
 Introduction
 ============
 Within this archive you find the replication package for the article "A Comparative Study to Benchmark Cross-project Defect Prediction Approaches" by Steffen Herbold, Alexander Trautsch, and Jens Grawbowski for currently under review at IEEE Transactions on Software Engineering. The aim of this replication package is to allow other researchers to replicate our results with minimal effort, as well as to provide additional results that could not be included in the article directly. 
