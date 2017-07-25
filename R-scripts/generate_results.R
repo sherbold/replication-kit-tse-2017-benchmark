@@ -21,14 +21,18 @@ PLOT_PATH = "figures/"
 TABLES_PATH = "tables/"
 
 # If true the plots included in the article are generated
-CREATEPLOTS = TRUE
+CREATEPLOTS = FALSE
 
 # Defines wether Friedman-Nemenyi or ANOVA with Scott-Knott clustering is used for ranking
 # TRUE = Friedman-Nemenyi, FALSE = Scott-Knott
 NONPARAMETRIC = TRUE
 
+# 1 for fine-grained Nemenyi ranking from the correction
+# Any other number for the three-ranks approach from the original paper
+NONPARAMETRICRANKINGMODE = 1
+
 # If true CD charts for Friedman-Nemenyi tests are created
-PRINTCDCHARTS = TRUE
+PRINTCDCHARTS = FALSE
 CD_EXPORT_WIDTH = 10
 
 #################################
@@ -42,7 +46,6 @@ if (!require("xtable")) install.packages("xtable")
 if (!require("reshape")) install.packages("reshape")
 if (!require("gdata")) install.packages("gdata")
 if (!require("stringr")) install.packages("stringr")
-if (!require("PMCMR")) install.packages("PMCMR")
 
 library(RMySQL)
 library(ScottKnott)
@@ -52,7 +55,9 @@ library(xtable)
 library(reshape)
 library(gdata)
 library(stringr)
-library(PMCMR)
+
+# We have to increase the number of nested expressions, because the CD diagrams cannot be plotted otherwise
+options(expressions=10000)
 
 ########################################################
 # Definition of functions with result evaluation logic #
@@ -84,44 +89,49 @@ evaluateCPDPBenchmark = function(metricNames, datasets) {
       cnts[cnts$config==results$config[j],]$count = cnts[cnts$config==results$config[j],]$count+1
       results$index[j] = cnts[cnts$config==results$config[j],]$count
     }
-
+    
     if( "auc" %in% metricNames ) {
       if( NONPARAMETRIC) {
         # Friedman-Nemenyi Test
-        testres = posthoc.friedman.nemenyi.test(auc ~ config | index, results)
+        meanRanks = createMeanRankMat(results, "auc")
         if( PRINTCDCHARTS ) {
           printMetricName = "AUC"
-          plotObj = plotCDNemenyiFriedman(testres, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data (Green=Rank 1, Blue=Rank 2, Red=Rank 3)", sep=""))
+          plotObj = plotCDNemenyiFriedman(meanRanks, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data", sep=""))
           ggsave(filename = paste(PLOT_PATH,printMetricName,"_",dataset,".png",sep=""), plot=plotObj, device="png", width = CD_EXPORT_WIDTH, height = CD_EXPORT_WIDTH)
         }
-        teststat = convertFriedmanNemenyiResult(testres)
-        meanRanks = as.data.frame(sort(colMeans(teststat, na.rm=T)))
-        colnames(meanRanks)[1] = "meanRank"
-        meanRanks$config = as.factor(rownames(meanRanks))
-        cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
-        maxMeanRank = max(meanRanks$meanRank)
-        minMeanRank = min(meanRanks$meanRank)
+        
         colnumber = ncol(configurations)+1
-        # with CD within first results
-        if( maxMeanRank-minMeanRank<=cdNemenyi ) {
-          # all on first rank
-          configurations[, colnumber] = 1
-        }
-        else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
-          # only two ranks
-          print("bar")
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+        if( NONPARAMETRICRANKINGMODE==1 ) {
+          for( j in 1:nrow(configurations) ) {
+            if( configurations$config[j] %in% meanRanks$config) {
+              configurations[j,colnumber] = meanRanks[meanRanks$config==configurations$config[j],]$normRank
+            }
+          }
         } else {
-          # three ranks
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
-          thirdRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
-          configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
+          maxMeanRank = max(meanRanks$meanRank)
+          minMeanRank = min(meanRanks$meanRank)
+          
+          # with CD within first results
+          if( maxMeanRank-minMeanRank<=cdNemenyi ) {
+            # all on first rank
+            configurations[, colnumber] = 1
+          }
+          else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
+            # only two ranks
+            firstRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank = meanRanks$config[meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+          } else {
+            # three ranks
+            firstRank <<- meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank <<- meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            thirdRank <<- meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+            configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          }
         }
         colnames(configurations)[colnumber] = paste("AUC",dataset,sep="_")
       } else {
@@ -146,40 +156,45 @@ evaluateCPDPBenchmark = function(metricNames, datasets) {
     if( "fscore" %in% metricNames ) {
       if (NONPARAMETRIC ) {
         # Friedman-Nemenyi Test
-        testres = posthoc.friedman.nemenyi.test(fscore ~ config | index, results)
+        meanRanks = createMeanRankMat(results, "fscore")
         if( PRINTCDCHARTS ) {
           printMetricName = "F-Measure"
-          plotObj = plotCDNemenyiFriedman(testres, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data (Green=Rank 1, Blue=Rank 2, Red=Rank 3)", sep=""))
+          plotObj = plotCDNemenyiFriedman(meanRanks, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data", sep=""))
           ggsave(filename = paste(PLOT_PATH,printMetricName,"_",dataset,".png",sep=""), plot=plotObj, device="png", width = CD_EXPORT_WIDTH, height = CD_EXPORT_WIDTH)
         }
-        teststat = convertFriedmanNemenyiResult(testres)
-        meanRanks = as.data.frame(sort(colMeans(teststat, na.rm=T)))
-        colnames(meanRanks)[1] = "meanRank"
-        meanRanks$config = as.factor(rownames(meanRanks))
-        cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
-        maxMeanRank = max(meanRanks$meanRank)
-        minMeanRank = min(meanRanks$meanRank)
+        
         colnumber = ncol(configurations)+1
-        # with CD within first results
-        if( maxMeanRank-minMeanRank<=cdNemenyi ) {
-          # all on first rank
-          configurations[, colnumber] = 1
-        }
-        else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
-          # only two ranks
-          print("bar")
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+        if( NONPARAMETRICRANKINGMODE==1 ) {
+          for( j in 1:nrow(configurations) ) {
+            if( configurations$config[j] %in% meanRanks$config) {
+              configurations[j,colnumber] = meanRanks[meanRanks$config==configurations$config[j],]$normRank
+            }
+          }
         } else {
-          # three ranks
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
-          thirdRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
-          configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
+          maxMeanRank = max(meanRanks$meanRank)
+          minMeanRank = min(meanRanks$meanRank)
+          
+          # with CD within first results
+          if( maxMeanRank-minMeanRank<=cdNemenyi ) {
+            # all on first rank
+            configurations[, colnumber] = 1
+          }
+          else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
+            # only two ranks
+            firstRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank = meanRanks$config[meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+          } else {
+            # three ranks
+            firstRank <<- meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank <<- meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            thirdRank <<- meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+            configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          }
         }
         colnames(configurations)[colnumber] = paste("FMEAS",dataset,sep="_")
       }
@@ -204,40 +219,45 @@ evaluateCPDPBenchmark = function(metricNames, datasets) {
     if( "gscore" %in% metricNames ) {
       if (NONPARAMETRIC ) {
         # Friedman-Nemenyi Test
-        testres = posthoc.friedman.nemenyi.test(gscore ~ config | index, results)
+        meanRanks = createMeanRankMat(results, "gscore")
         if( PRINTCDCHARTS ) {
-          printMetricName = "G-Measure"
-          plotObj = plotCDNemenyiFriedman(testres, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data (Green=Rank 1, Blue=Rank 2, Red=Rank 3)", sep=""))
+          printMetricName = "G-measure"
+          plotObj = plotCDNemenyiFriedman(meanRanks, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data", sep=""))
           ggsave(filename = paste(PLOT_PATH,printMetricName,"_",dataset,".png",sep=""), plot=plotObj, device="png", width = CD_EXPORT_WIDTH, height = CD_EXPORT_WIDTH)
         }
-        teststat = convertFriedmanNemenyiResult(testres)
-        meanRanks = as.data.frame(sort(colMeans(teststat, na.rm=T)))
-        colnames(meanRanks)[1] = "meanRank"
-        meanRanks$config = as.factor(rownames(meanRanks))
-        cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
-        maxMeanRank = max(meanRanks$meanRank)
-        minMeanRank = min(meanRanks$meanRank)
+        
         colnumber = ncol(configurations)+1
-        # with CD within first results
-        if( maxMeanRank-minMeanRank<=cdNemenyi ) {
-          # all on first rank
-          configurations[, colnumber] = 1
-        }
-        else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
-          # only two ranks
-          print("bar")
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+        if( NONPARAMETRICRANKINGMODE==1 ) {
+          for( j in 1:nrow(configurations) ) {
+            if( configurations$config[j] %in% meanRanks$config) {
+              configurations[j,colnumber] = meanRanks[meanRanks$config==configurations$config[j],]$normRank
+            }
+          }
         } else {
-          # three ranks
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
-          thirdRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
-          configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
+          maxMeanRank = max(meanRanks$meanRank)
+          minMeanRank = min(meanRanks$meanRank)
+          
+          # with CD within first results
+          if( maxMeanRank-minMeanRank<=cdNemenyi ) {
+            # all on first rank
+            configurations[, colnumber] = 1
+          }
+          else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
+            # only two ranks
+            firstRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank = meanRanks$config[meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+          } else {
+            # three ranks
+            firstRank <<- meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank <<- meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            thirdRank <<- meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+            configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          }
         }
         colnames(configurations)[colnumber] = paste("GMEAS",dataset,sep="_")
       }
@@ -262,40 +282,45 @@ evaluateCPDPBenchmark = function(metricNames, datasets) {
     if( "mcc" %in% metricNames ) {
       if (NONPARAMETRIC ) {
         # Friedman-Nemenyi Test
-        testres = posthoc.friedman.nemenyi.test(mcc ~ config | index, results)
+        meanRanks = createMeanRankMat(results, "mcc")
         if( PRINTCDCHARTS ) {
           printMetricName = "MCC"
-          plotObj = plotCDNemenyiFriedman(testres, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data (Green=Rank 1, Blue=Rank 2, Red=Rank 3)", sep=""))
+          plotObj = plotCDNemenyiFriedman(meanRanks, max(results$index), title=paste("Critical Distance Diagram for ", printMetricName, " and the ", dataset, " data", sep=""))
           ggsave(filename = paste(PLOT_PATH,printMetricName,"_",dataset,".png",sep=""), plot=plotObj, device="png", width = CD_EXPORT_WIDTH, height = CD_EXPORT_WIDTH)
         }
-        teststat = convertFriedmanNemenyiResult(testres)
-        meanRanks = as.data.frame(sort(colMeans(teststat, na.rm=T)))
-        colnames(meanRanks)[1] = "meanRank"
-        meanRanks$config = as.factor(rownames(meanRanks))
-        cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
-        maxMeanRank = max(meanRanks$meanRank)
-        minMeanRank = min(meanRanks$meanRank)
+        
         colnumber = ncol(configurations)+1
-        # with CD within first results
-        if( maxMeanRank-minMeanRank<=cdNemenyi ) {
-          # all on first rank
-          configurations[, colnumber] = 1
-        }
-        else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
-          # only two ranks
-          print("bar")
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+        if( NONPARAMETRICRANKINGMODE==1 ) {
+          for( j in 1:nrow(configurations) ) {
+            if( configurations$config[j] %in% meanRanks$config) {
+              configurations[j,colnumber] = meanRanks[meanRanks$config==configurations$config[j],]$normRank
+            }
+          }
         } else {
-          # three ranks
-          firstRank = meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
-          secondRank = meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
-          thirdRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
-          configurations[configurations$config %in% firstRank, colnumber] = 1
-          configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
-          configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          cdNemenyi = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
+          maxMeanRank = max(meanRanks$meanRank)
+          minMeanRank = min(meanRanks$meanRank)
+          
+          # with CD within first results
+          if( maxMeanRank-minMeanRank<=cdNemenyi ) {
+            # all on first rank
+            configurations[, colnumber] = 1
+          }
+          else if(maxMeanRank-minMeanRank<=2*cdNemenyi)  {
+            # only two ranks
+            firstRank = meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank = meanRanks$config[meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+          } else {
+            # three ranks
+            firstRank <<- meanRanks$config[meanRanks$meanRank>=maxMeanRank-cdNemenyi]
+            secondRank <<- meanRanks$config[meanRanks$meanRank>minMeanRank+cdNemenyi & meanRanks$meanRank<maxMeanRank-cdNemenyi]
+            thirdRank <<- meanRanks$config[meanRanks$meanRank<=minMeanRank+cdNemenyi]
+            configurations[configurations$config %in% firstRank, colnumber] = 1
+            configurations[configurations$config %in% secondRank, colnumber] = 1-length(firstRank)/(nrow(meanRanks)-1)
+            configurations[configurations$config %in% thirdRank, colnumber] = 1-(length(firstRank)+length(secondRank))/(nrow(meanRanks)-1)
+          }
         }
         colnames(configurations)[colnumber] = paste("MCC",dataset,sep="_")
       }
@@ -361,7 +386,7 @@ evaluateCPDPBenchmark = function(metricNames, datasets) {
   skresults = configurations
   rownames(skresults) = skresults$config
   skresults$config = NULL
-
+  
   skresults$MEANRANK = rowMeans(skresults[!startsWith(colnames(skresults), "mean")], na.rm=TRUE)
   skresults$config = as.factor(rownames(skresults))
   for( i in 1:nrow(skresults) ) {
@@ -551,7 +576,7 @@ compareDatasets = function(set1, set2, metric) {
   dbDisconnect(mydb)
 }
 
-evalRQ3 = function() {
+evalRQ2 = function() {
   mydb = dbConnect(MySQL(), user=MYSQL_USER, password=MYSQL_PASSWORT, host=MYSQL_HOST, port=MYSQL_PORT, dbname=MYSQL_DBNAME)
   
   sqlStatement = "SELECT count1, count2, count1/count2 FROM (SELECT count(*) as count1 FROM results WHERE configurationName NOT LIKE 'F%' AND configurationName NOT LIKE 'S%' AND recall>=0.75 AND results.precision>=0.75 AND error<=0.25) q1, (SELECT count(*) as count2 FROM results WHERE configurationName NOT LIKE 'F%' AND configurationName NOT LIKE 'S%') q2;"
@@ -599,7 +624,7 @@ evalRQ3 = function() {
     cat(paste(str_pad(results[i,1], width=25, side="right"), str_pad(results[i,2], width=20, side="right"), results[i,3], results[i,4], "\n", sep="\t"))
   }
   cat("\n")
-
+  
   sqlStatement = "SELECT distinct productName FROM results WHERE configurationName  NOT LIKE 'F%' AND configurationName NOT LIKE 'S%' AND recall>=0.75 AND results.precision>=0.75 AND error<=0.25 AND testsize>=100 GROUP BY configurationName, classifier"
   rs = dbSendQuery(mydb, sqlStatement)
   results = fetch(rs, n=-1)
@@ -625,7 +650,7 @@ evalRQ3 = function() {
   results$Product = NULL
   results$Data = 'JURECZKO'
   results = results[,c(4,1,2,3)]
-
+  
   captionStr = "Products where any \\ac{CPDP} approach fulfills the criterion by Zimmermann\\etal~\\cite{Zimmermann2009} and the \\emph{precision} of the trivial prediction FIX."
   tableStr = print.xtable(xtable(results, caption=captionStr))
   #tableStr = sub("\\begin{table}", "\\begin{table*}", tableStr, fixed=TRUE)
@@ -643,73 +668,11 @@ evalRQ3 = function() {
   dbDisconnect(mydb)
 }
 
-
-writeResultsTableRQ2 = function(rq2best) {
-  resultsTableFrame = round(rq2best[,1:8], digits=2)
-  
-  colnumber = ncol(resultsTableFrame)+1
-  resultsTableFrame[,colnumber] = paste(resultsTableFrame$meanEFFORT_JURECZKO, " (", resultsTableFrame$EFFORT_JURECZKO, ")", sep="")
-  colnames(resultsTableFrame)[colnumber] = "aucec"
-  colnumber = ncol(resultsTableFrame)+1
-  
-  colnumber = ncol(resultsTableFrame)+1
-  resultsTableFrame[,colnumber] = paste(resultsTableFrame$meanEFFORT_MDP, " (", resultsTableFrame$EFFORT_MDP, ")", sep="")
-  colnames(resultsTableFrame)[colnumber] = "aucec"
-  colnumber = ncol(resultsTableFrame)+1
-  
-  colnumber = ncol(resultsTableFrame)+1
-  resultsTableFrame[,colnumber] = paste(resultsTableFrame$meanEFFORT_AEEEM, " (", resultsTableFrame$EFFORT_AEEEM, ")", sep="")
-  colnames(resultsTableFrame)[colnumber] = "aucec"
-  colnumber = ncol(resultsTableFrame)+1
-  
-  colnumber = ncol(resultsTableFrame)+1
-  resultsTableFrame[,colnumber] = paste(resultsTableFrame$meanEFFORT_RELINK, " (", resultsTableFrame$EFFORT_RELINK, ")", sep="")
-  colnames(resultsTableFrame)[colnumber] = "aucec"
-  colnumber = ncol(resultsTableFrame)+1
-  
-  tableCaption = "Mean results over all products with rankscores in brackets. For FILTERJURECZKO, no rankscores are shown as it is only used for comparison to JURECKO but not for ranking."
-  tableStr = print.xtable(xtable(resultsTableFrame[,9:12], caption=tableCaption))
-  
-  tableStr = sub("\\hline", "\\hline\n & JURECZKO & MDP & AEEEM & RELINK \\\\\n\\hline", tableStr, fixed=TRUE)
-  tableStr = sub("rllll", "|r|llll|", tableStr, fixed=TRUE)
-  tableStr = gsub("NaN (NA)", "-", tableStr, fixed=TRUE)
-  tableStr = gsub("&  &", "& - &", tableStr, fixed=TRUE)
-  tableStr = gsub("aucec.1", "\\emph{effort}", tableStr, fixed=TRUE)
-  tableStr = gsub("aucec.2", "\\emph{effort}", tableStr, fixed=TRUE)
-  tableStr = gsub("aucec.3", "\\emph{effort}", tableStr, fixed=TRUE)
-  tableStr = gsub("aucec.4", "\\emph{effort}", tableStr, fixed=TRUE)
-  tableStr = gsub("aucec ", "\\emph{effort} ", tableStr, fixed=TRUE)
-  tableStr = gsub("NaN (NA)", "-", tableStr, fixed=TRUE)
-  
-  write(tableStr, paste(TABLES_PATH, "resultsTableRQ2.tex", sep=""))
-}
-
-convertFriedmanNemenyiResult <- function(testresult) {
-  teststat = testresult$statistic
-  teststat = cbind(teststat, teststat[nrow(teststat),])
-  colnames(teststat)[ncol(teststat)] = rownames(teststat)[nrow(teststat)]
-  tmpRow = data.frame(c(0, teststat[,1]))
-  colnames(tmpRow)[1] = colnames(teststat)
-  teststat = rbind(t(tmpRow), teststat)
-  teststat[1,1] <- NA
-  colnames(teststat)[1] = rownames(teststat)[1]
-  for( j in 1:nrow(teststat) ) {
-    for( k in j:ncol(teststat)) {
-      teststat[j, k] = teststat[k, j]
-    }
-  }
-  return(teststat)
-}
-
 getNemenyiCD <- function(pval, nConfigs, nData) {
   return(qtukey(1 - pval, nConfigs, Inf) / sqrt((nConfigs*(nConfigs+1))/(12*nData)))
 }
 
-plotCDNemenyiFriedman <- function(testresult, nData, pval=0.05, title="" ) {
-  teststat = convertFriedmanNemenyiResult(testresult)
-  meanRanks = as.data.frame(sort(colMeans(teststat, na.rm=T)))
-  colnames(meanRanks)[1] = "meanRank"
-  meanRanks$config = as.factor(rownames(meanRanks))
+plotCDNemenyiFriedman <- function(meanRanks, nData, pval=0.05, title="" ) {
   nConfigs = nrow(meanRanks)
   cdNemenyi = getNemenyiCD(pval, nConfigs, nData)
   
@@ -719,6 +682,26 @@ plotCDNemenyiFriedman <- function(testresult, nData, pval=0.05, title="" ) {
   minMeanRank = min(meanRanks$meanRank)
   halfEntries = ceiling(nrow(meanRanks)/2)
   
+  red = 0.8
+  green = 0
+  stepsize = 1.6/max(meanRanks$rank)
+  colors = list()
+  for( j in 1:max(meanRanks$rank) ) {
+    colors[j] = rgb(green, red, 0)
+    if( green+stepsize>0.8 ) {
+      green = 0.8
+      red = red-stepsize
+      if( red<0 ) {
+        red = 0
+      }
+    } else {
+      green = green+stepsize
+      if( green>0.8 ) {
+        green = 0.8
+      }
+    }
+  }
+  meanRanks <- meanRanks[order(meanRanks$meanRank, decreasing = FALSE),]
   g <- ggplot(data=meanRanks)
   # create lines for configurations
   for( j in 1:nrow(meanRanks)) {
@@ -743,16 +726,31 @@ plotCDNemenyiFriedman <- function(testresult, nData, pval=0.05, title="" ) {
     else {
       color = "#0000cc"
     }
+    color = colors[[meanRanks$rank[j]]]
     g <- g + geom_segment(x=xval, y=0, xend=xval, yend=-yend, color = color)
     g <- g + geom_segment(x=xlinestart, y=-yend, xend=xval, yend=-yend, color = color)
     g <- g + geom_text(label=meanRanks$config[j], x=xtext, y=-yend, hjust=hjust, color=color)
   }
   # create axis
-  g <- g + geom_segment(x=roundedMinMeanRank,y=0,xend=roundedMaxMeanRank,yend=0)
+  if( roundedMaxMeanRank>100 ) {
+    breaks = 1:(roundedMaxMeanRank/5)*5
+  } else if( roundedMaxMeanRank>80 ) {
+    breaks = 1:(roundedMaxMeanRank/4)*4
+  } else if( roundedMaxMeanRank>60 ) {
+    breaks = 1:(roundedMaxMeanRank/3)*3
+  } else if( roundedMaxMeanRank>40 ) {
+    breaks = 1:(roundedMaxMeanRank/2)*2
+  } else {
+    breaks = 1:roundedMaxMeanRank
+  }
+  breaks <<- breaks
+  g <- g + geom_segment(x=0,y=0,xend=roundedMaxMeanRank,yend=0)
   g <- g + geom_text(label="Mean Rank", x=roundedMinMeanRank-0.2/roundedMaxMeanRank, y=0.01*halfEntries, hjust="right", vjust="bottom")
   for( j in roundedMinMeanRank:roundedMaxMeanRank ) {
-    g <- g + geom_segment(x=j,y=0,xend=j,yend=0.01*halfEntries)
-    g <- g + geom_text(label=j, x=j, y=0.015*halfEntries, vjust="bottom")
+    if( j %in% breaks ) {
+      g <- g + geom_segment(x=j,y=0,xend=j,yend=0.01*halfEntries)
+      g <- g + geom_text(label=j, x=j, y=0.015*halfEntries, vjust="bottom")
+    }
   }
   # add critical distance
   critDistY = 3
@@ -762,12 +760,39 @@ plotCDNemenyiFriedman <- function(testresult, nData, pval=0.05, title="" ) {
   g <- g + geom_text(label=paste("Critical Distance =", round(cdNemenyi, digits=3)), x=minMeanRank-0.2/roundedMaxMeanRank, y=critDistY, hjust="right")
   # set scales
   g <- g + scale_y_continuous(limits=c(-halfEntries,1), breaks=NULL, labels=NULL)
-  g <- g + scale_x_continuous(limits=c(0,roundedMaxMeanRank+1), breaks=1:roundedMaxMeanRank, labels=NULL)
+  g <- g + scale_x_continuous(limits=c(roundedMinMeanRank-1,roundedMaxMeanRank+1), breaks=breaks, labels=NULL)
   g <- g + theme(axis.ticks.x = element_blank())
   # set title
   g <- g + ggtitle(title)
-  g <- g + coord_cartesian(xlim=c(roundedMinMeanRank-1,roundedMaxMeanRank+1))
+  g <- g + coord_cartesian(xlim=c(roundedMinMeanRank-0.2*roundedMaxMeanRank,roundedMaxMeanRank+0.2*roundedMaxMeanRank))
   return(g)
+}
+
+createMeanRankMat <- function(results, column) {
+  nemenyi.groups = factor(as.character(results$config))
+  nemenyi.blocks = factor(results$index)
+  nemenyi.y = results[[column]]
+  nemenyi.n = length(levels(nemenyi.blocks))
+  nemenyi.k = length(levels(nemenyi.groups))
+  nemenyi.y = nemenyi.y[order(nemenyi.groups, nemenyi.blocks)]
+  nemenyi.mat = matrix(nemenyi.y, nrow = nemenyi.n, ncol = nemenyi.k, byrow = FALSE)
+  for (nemenyi.i in 1:length(nemenyi.mat[, 1])) nemenyi.mat[nemenyi.i, ] <- rank(nemenyi.mat[nemenyi.i, ])
+  nemenyi.mnsum = data.frame(meanRank=colMeans(nemenyi.mat))
+  nemenyi.mnsum$config = levels(nemenyi.groups)
+  # create ranks
+  # break if difference > cd
+  nemenyi.cd = getNemenyiCD(0.05, length(unique(results$config)), max(results$index))
+  nemenyi.mnsum = nemenyi.mnsum[order(-nemenyi.mnsum$meanRank),]
+  currentRank = 1
+  nemenyi.mnsum$rank[1] = 1
+  for( i in 2:nrow(nemenyi.mnsum ))  {
+    if(nemenyi.mnsum$meanRank[i-1]-nemenyi.mnsum$meanRank[i]>nemenyi.cd) {
+      currentRank = currentRank+1
+    }
+    nemenyi.mnsum$rank[i] = currentRank
+  }
+  nemenyi.mnsum$normRank = 1-(nemenyi.mnsum$rank-1)/(max(nemenyi.mnsum$rank)-1)
+  return(nemenyi.mnsum)
 }
 
 #####################
@@ -783,15 +808,15 @@ metricNamesRQ1 = c("auc","fscore","gscore","mcc")
 
 # Datasets that are used for different research questions. 
 datasetsRQ1 = c("JURECZKO", "MDP", "AEEEM_LDHHWCHU", "RELINK", "NETGENE")
-datasetsRQ4 = c("FILTERJURECZKO")
-datasetsRQ5 = c("SELECTEDJURECZKO")
+datasetsRQ3 = c("FILTERJURECZKO")
+datasetsRQ4 = c("SELECTEDJURECZKO")
 
 rq1results = evaluateCPDPBenchmark(metricNamesRQ1, datasetsRQ1)
 rq1best = plotBestResults(rq1results, "RQ1", "AUC, F-measure, G-Measure, and MCC")
+rq3results = evaluateCPDPBenchmark(metricNamesRQ1, datasetsRQ3)
 rq4results = evaluateCPDPBenchmark(metricNamesRQ1, datasetsRQ4)
-rq5results = evaluateCPDPBenchmark(metricNamesRQ1, datasetsRQ5)
-writeResultsTableRQ1(rq1best, rq4results, rq5results)
-evalRQ3()
+writeResultsTableRQ1(rq1best, rq3results, rq4results)
+evalRQ2()
 
 cat("comparing JURECZKO and FILTERJURECZKO\n")
 compareDatasets("JURECZKO", "FILTERJURECZKO", "auc")
